@@ -6,16 +6,40 @@ import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import Icon from '@/components/ui/icon';
 
 // Типы данных
+interface CustomStatus {
+  id: string;
+  name: string;
+  color: string;
+  bgColor: string;
+}
+
 interface SecurityZone {
   id: number;
   name: string;
   address: string;
-  status: 'protected' | 'unprotected' | 'emergency';
+  status: 'protected' | 'unprotected' | 'emergency' | string;
+  customStatus?: CustomStatus;
   lastUpdate: Date;
   battery: number;
+  contractStatus: 'active' | 'suspended' | 'terminated';
+  phone?: string;
+}
+
+interface ZoneHistoryEvent {
+  id: string;
+  zoneId: number;
+  event: 'protection_on' | 'protection_off' | 'emergency_call' | 'battery_change' | 'custom_status' | 'contract_change';
+  timestamp: Date;
+  details: string;
+  oldValue?: string;
+  newValue?: string;
 }
 
 interface EmergencyCall {
@@ -33,63 +57,160 @@ const Index = () => {
   const [emergencyCalls, setEmergencyCalls] = useState<number[]>([]);
   const [emergencyHistory, setEmergencyHistory] = useState<EmergencyCall[]>([]);
   const [selectedZones, setSelectedZones] = useState<number[]>([]);
+  const [zoneHistory, setZoneHistory] = useState<ZoneHistoryEvent[]>([]);
+  const [customStatuses, setCustomStatuses] = useState<CustomStatus[]>([]);
+  const [selectedZoneForReport, setSelectedZoneForReport] = useState<SecurityZone | null>(null);
+  
+  // Состояния для создания нового участка
+  const [newZoneAddress, setNewZoneAddress] = useState('');
+  const [newZonePhone, setNewZonePhone] = useState('');
+  const [isAddingZone, setIsAddingZone] = useState(false);
 
-  // Инициализация 125 участков
+  // Состояния для кастомных статусов
+  const [newStatusName, setNewStatusName] = useState('');
+  const [newStatusColor, setNewStatusColor] = useState('#3b82f6');
+  const [isAddingStatus, setIsAddingStatus] = useState(false);
+
+  // Инициализация 425 участков (125 + 300)
   useEffect(() => {
-    const initialZones: SecurityZone[] = Array.from({ length: 125 }, (_, i) => ({
+    const initialZones: SecurityZone[] = Array.from({ length: 425 }, (_, i) => ({
       id: i + 1,
       name: `Участок ${i + 1}`,
       address: `ул. Охранная, ${i + 1}`,
       status: Math.random() > 0.7 ? 'protected' : 'unprotected',
       lastUpdate: new Date(),
       battery: Math.floor(Math.random() * 100) + 1,
+      contractStatus: 'active',
+      phone: `+7${Math.floor(Math.random() * 9000000000 + 1000000000)}`,
     }));
     setZones(initialZones);
+
+    // Инициализация кастомных статусов
+    const initialStatuses: CustomStatus[] = [
+      { id: '1', name: 'Ремонт', color: '#f59e0b', bgColor: '#fef3c7' },
+      { id: '2', name: 'Тестирование', color: '#8b5cf6', bgColor: '#f3e8ff' },
+      { id: '3', name: 'Отпуск', color: '#06b6d4', bgColor: '#cffafe' },
+    ];
+    setCustomStatuses(initialStatuses);
   }, []);
 
-  // Симуляция срабатывания сигнализации каждые 5 минут
+  // Симуляция срабатывания сигнализации каждые 10 минут
   useEffect(() => {
     const interval = setInterval(() => {
-      const randomZoneId = Math.floor(Math.random() * 125) + 1;
-      const zone = zones.find(z => z.id === randomZoneId);
+      const activeZones = zones.filter(z => z.contractStatus === 'active');
+      if (activeZones.length === 0) return;
+      
+      const randomZone = activeZones[Math.floor(Math.random() * activeZones.length)];
+      const zone = zones.find(z => z.id === randomZone.id);
+      
       if (zone) {
         setZones(prev => prev.map(zone => 
-          zone.id === randomZoneId 
+          zone.id === randomZone.id 
             ? { ...zone, status: 'emergency', lastUpdate: new Date() }
             : zone
         ));
-        setEmergencyCalls(prev => [...prev, randomZoneId]);
+        setEmergencyCalls(prev => [...prev, randomZone.id]);
         
-        // Добавляем в историю
+        // Добавляем в историю участка
+        const historyEvent: ZoneHistoryEvent = {
+          id: `${randomZone.id}-emergency-${Date.now()}`,
+          zoneId: randomZone.id,
+          event: 'emergency_call',
+          timestamp: new Date(),
+          details: 'Автоматическое срабатывание сигнализации'
+        };
+        setZoneHistory(prev => [historyEvent, ...prev]);
+        
+        // Добавляем в общую историю вызовов
         const newCall: EmergencyCall = {
-          id: `${randomZoneId}-${Date.now()}`,
-          zoneId: randomZoneId,
-          zoneName: `Участок ${randomZoneId}`,
+          id: `${randomZone.id}-${Date.now()}`,
+          zoneId: randomZone.id,
+          zoneName: `Участок ${randomZone.id}`,
           timestamp: new Date(),
           status: 'active'
         };
         setEmergencyHistory(prev => [newCall, ...prev]);
       }
-    }, 30000); // Для демо каждые 30 секунд
+    }, 600000); // 10 минут = 600000 мс, для демо используем 60000 (1 минута)
 
     return () => clearInterval(interval);
   }, [zones]);
 
   // Функции управления
+  const addHistoryEvent = (zoneId: number, event: ZoneHistoryEvent['event'], details: string, oldValue?: string, newValue?: string) => {
+    const historyEvent: ZoneHistoryEvent = {
+      id: `${zoneId}-${event}-${Date.now()}`,
+      zoneId,
+      event,
+      timestamp: new Date(),
+      details,
+      oldValue,
+      newValue
+    };
+    setZoneHistory(prev => [historyEvent, ...prev]);
+  };
+
   const setProtection = (zoneId: number, protect: boolean) => {
-    setZones(prev => prev.map(zone => 
-      zone.id === zoneId 
-        ? { ...zone, status: protect ? 'protected' : 'unprotected', lastUpdate: new Date() }
-        : zone
-    ));
+    const zone = zones.find(z => z.id === zoneId);
+    if (zone) {
+      setZones(prev => prev.map(zone => 
+        zone.id === zoneId 
+          ? { ...zone, status: protect ? 'protected' : 'unprotected', lastUpdate: new Date() }
+          : zone
+      ));
+      
+      addHistoryEvent(
+        zoneId, 
+        protect ? 'protection_on' : 'protection_off',
+        protect ? 'Участок поставлен на охрану' : 'Участок снят с охраны',
+        zone.status,
+        protect ? 'protected' : 'unprotected'
+      );
+    }
   };
 
   const setBattery = (zoneId: number, charge: boolean) => {
-    setZones(prev => prev.map(zone => 
-      zone.id === zoneId 
-        ? { ...zone, battery: charge ? 100 : Math.max(0, zone.battery - 20), lastUpdate: new Date() }
-        : zone
-    ));
+    const zone = zones.find(z => z.id === zoneId);
+    if (zone) {
+      const newBattery = charge ? 100 : Math.max(0, zone.battery - 20);
+      setZones(prev => prev.map(zone => 
+        zone.id === zoneId 
+          ? { ...zone, battery: newBattery, lastUpdate: new Date() }
+          : zone
+      ));
+      
+      addHistoryEvent(
+        zoneId,
+        'battery_change',
+        charge ? 'Батарея заряжена до 100%' : `Батарея разряжена до ${newBattery}%`,
+        `${zone.battery}%`,
+        `${newBattery}%`
+      );
+    }
+  };
+
+  const setCustomStatus = (zoneId: number, customStatus: CustomStatus | null) => {
+    const zone = zones.find(z => z.id === zoneId);
+    if (zone) {
+      setZones(prev => prev.map(zone => 
+        zone.id === zoneId 
+          ? { 
+              ...zone, 
+              customStatus, 
+              status: customStatus ? customStatus.id : 'unprotected',
+              lastUpdate: new Date() 
+            }
+          : zone
+      ));
+      
+      addHistoryEvent(
+        zoneId,
+        'custom_status',
+        customStatus ? `Установлен статус: ${customStatus.name}` : 'Сброшен кастомный статус',
+        zone.customStatus?.name || 'Нет',
+        customStatus?.name || 'Нет'
+      );
+    }
   };
 
   const emergencyCall = (zoneId: number) => {
@@ -97,10 +218,12 @@ const Index = () => {
     if (zone) {
       setZones(prev => prev.map(zone => 
         zone.id === zoneId 
-          ? { ...zone, status: 'emergency', lastUpdate: new Date() }
+          ? { ...zone, status: 'emergency', customStatus: undefined, lastUpdate: new Date() }
           : zone
       ));
       setEmergencyCalls(prev => [zoneId, ...prev]);
+      
+      addHistoryEvent(zoneId, 'emergency_call', 'Экстренный вызов ГБР');
       
       // Добавляем в историю
       const newCall: EmergencyCall = {
@@ -128,6 +251,72 @@ const Index = () => {
         ? { ...call, status: 'resolved', responseTime: Math.floor(Math.random() * 10) + 1 }
         : call
     ));
+    
+    addHistoryEvent(zoneId, 'emergency_call', 'Тревога сброшена');
+  };
+
+  const setContractStatus = (zoneId: number, status: 'active' | 'suspended' | 'terminated') => {
+    const zone = zones.find(z => z.id === zoneId);
+    if (zone) {
+      setZones(prev => prev.map(zone => 
+        zone.id === zoneId 
+          ? { ...zone, contractStatus: status, lastUpdate: new Date() }
+          : zone
+      ));
+      
+      const statusTexts = {
+        active: 'Договор активен',
+        suspended: 'Тариф приостановлен',
+        terminated: 'Договор расторгнут'
+      };
+      
+      addHistoryEvent(
+        zoneId,
+        'contract_change',
+        statusTexts[status],
+        zone.contractStatus,
+        status
+      );
+    }
+  };
+
+  const addNewZone = () => {
+    if (!newZoneAddress.trim() || !newZonePhone.trim()) return;
+    
+    const newId = Math.max(...zones.map(z => z.id)) + 1;
+    const newZone: SecurityZone = {
+      id: newId,
+      name: `Участок ${newId}`,
+      address: newZoneAddress,
+      phone: newZonePhone,
+      status: 'unprotected',
+      lastUpdate: new Date(),
+      battery: 100,
+      contractStatus: 'active'
+    };
+    
+    setZones(prev => [...prev, newZone]);
+    addHistoryEvent(newId, 'contract_change', 'Новый участок добавлен в систему');
+    
+    setNewZoneAddress('');
+    setNewZonePhone('');
+    setIsAddingZone(false);
+  };
+
+  const addCustomStatus = () => {
+    if (!newStatusName.trim()) return;
+    
+    const newStatus: CustomStatus = {
+      id: Date.now().toString(),
+      name: newStatusName,
+      color: newStatusColor,
+      bgColor: newStatusColor + '20'
+    };
+    
+    setCustomStatuses(prev => [...prev, newStatus]);
+    setNewStatusName('');
+    setNewStatusColor('#3b82f6');
+    setIsAddingStatus(false);
   };
 
   // Массовые операции
@@ -158,6 +347,7 @@ const Index = () => {
     protected: zones.filter(z => z.status === 'protected').length,
     unprotected: zones.filter(z => z.status === 'unprotected').length,
     emergency: zones.filter(z => z.status === 'emergency').length,
+    custom: zones.filter(z => z.customStatus).length,
     total: zones.length
   };
 
@@ -168,16 +358,27 @@ const Index = () => {
     return a.id - b.id;
   });
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'protected': return 'bg-green-500';
-      case 'emergency': return 'bg-red-500 animate-pulse';
-      default: return 'bg-blue-500';
+  const getStatusColor = (zone: SecurityZone) => {
+    if (zone.customStatus) return zone.customStatus.color;
+    switch (zone.status) {
+      case 'protected': return '#22c55e';
+      case 'emergency': return '#dc2626';
+      default: return '#3b82f6';
     }
   };
 
-  const getStatusText = (status: string) => {
-    switch (status) {
+  const getStatusBgColor = (zone: SecurityZone) => {
+    if (zone.customStatus) return zone.customStatus.bgColor;
+    switch (zone.status) {
+      case 'protected': return '#dcfce7';
+      case 'emergency': return '#fecaca';
+      default: return '#dbeafe';
+    }
+  };
+
+  const getStatusText = (zone: SecurityZone) => {
+    if (zone.customStatus) return zone.customStatus.name;
+    switch (zone.status) {
       case 'protected': return 'Под охраной';
       case 'emergency': return 'ВЫЕЗД ГБР';
       default: return 'Не охраняется';
@@ -186,9 +387,26 @@ const Index = () => {
 
   const getBadgeVariant = (status: string) => {
     switch (status) {
-      case 'protected': return 'default';
       case 'emergency': return 'destructive';
       default: return 'secondary';
+    }
+  };
+
+  const getContractStatusText = (status: string) => {
+    switch (status) {
+      case 'active': return 'Активен';
+      case 'suspended': return 'Приостановлен';
+      case 'terminated': return 'Расторгнут';
+      default: return status;
+    }
+  };
+
+  const getContractStatusColor = (status: string) => {
+    switch (status) {
+      case 'active': return 'text-green-600';
+      case 'suspended': return 'text-yellow-600';
+      case 'terminated': return 'text-red-600';
+      default: return 'text-gray-600';
     }
   };
 
@@ -209,7 +427,7 @@ const Index = () => {
 
       <div className="container mx-auto p-6">
         {/* Общая статистика */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-8">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-gray-600">Всего участков</CardTitle>
@@ -234,6 +452,15 @@ const Index = () => {
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-red-600">{stats.emergency}</div>
+            </CardContent>
+          </Card>
+          
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-gray-600">Кастомные статусы</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-purple-600">{stats.custom}</div>
             </CardContent>
           </Card>
           
@@ -268,7 +495,7 @@ const Index = () => {
                 <CardContent>
                   <p className="text-gray-600 mb-4">
                     Система управления охранными участками ГБР обеспечивает круглосуточный контроль 
-                    и безопасность 125 объектов.
+                    и безопасность {stats.total} объектов.
                   </p>
                   <div className="space-y-2">
                     <div className="flex justify-between">
@@ -317,13 +544,11 @@ const Index = () => {
                       <div
                         key={zone.id}
                         onClick={() => setSelectedZone(zone)}
-                        className={`p-3 rounded-lg cursor-pointer border transition-all hover:shadow-md ${
-                          zone.status === 'emergency' 
-                            ? 'bg-red-100 border-red-300' 
-                            : zone.status === 'protected'
-                            ? 'bg-green-50 border-green-300'
-                            : 'bg-blue-50 border-blue-200'
-                        } ${selectedZone?.id === zone.id ? 'ring-2 ring-blue-500' : ''}`}
+                        className="p-3 rounded-lg cursor-pointer border transition-all hover:shadow-md"
+                        style={{ 
+                          backgroundColor: getStatusBgColor(zone),
+                          borderColor: getStatusColor(zone) + '40'
+                        }}
                       >
                         <div className="flex items-center justify-between">
                           <div>
@@ -331,12 +556,13 @@ const Index = () => {
                             <div className="text-sm text-gray-500">{zone.address}</div>
                           </div>
                           <div className="text-right">
-                            <Badge variant={getBadgeVariant(zone.status)} className={
-                              zone.status === 'protected' ? 'bg-green-500 text-white' :
-                              zone.status === 'emergency' ? 'bg-red-500 text-white' :
-                              'bg-blue-500 text-white'
-                            }>
-                              {getStatusText(zone.status)}
+                            <Badge 
+                              style={{ 
+                                backgroundColor: getStatusColor(zone), 
+                                color: 'white' 
+                              }}
+                            >
+                              {getStatusText(zone)}
                             </Badge>
                             <div className="text-xs text-gray-400 mt-1">
                               Батарея: {zone.battery}%
@@ -367,7 +593,7 @@ const Index = () => {
                           </div>
                           <div>
                             <span className="text-gray-600">Статус:</span>
-                            <div className="font-medium">{getStatusText(selectedZone.status)}</div>
+                            <div className="font-medium">{getStatusText(selectedZone)}</div>
                           </div>
                           <div>
                             <span className="text-gray-600">Батарея:</span>
@@ -377,6 +603,38 @@ const Index = () => {
                             <span className="text-gray-600">Обновлено:</span>
                             <div className="font-medium">{selectedZone.lastUpdate.toLocaleTimeString()}</div>
                           </div>
+                        </div>
+                      </div>
+
+                      {/* Кастомный статус */}
+                      <div className="space-y-2">
+                        <Label>Кастомный статус:</Label>
+                        <div className="flex gap-2">
+                          <Select 
+                            value={selectedZone.customStatus?.id || ''} 
+                            onValueChange={(value) => {
+                              const status = customStatuses.find(s => s.id === value);
+                              setCustomStatus(selectedZone.id, status || null);
+                            }}
+                          >
+                            <SelectTrigger className="flex-1">
+                              <SelectValue placeholder="Выберите статус" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="">Сбросить</SelectItem>
+                              {customStatuses.map(status => (
+                                <SelectItem key={status.id} value={status.id}>
+                                  <div className="flex items-center gap-2">
+                                    <div 
+                                      className="w-3 h-3 rounded-full"
+                                      style={{ backgroundColor: status.color }}
+                                    />
+                                    {status.name}
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
                       </div>
 
@@ -404,7 +662,7 @@ const Index = () => {
                             <Button 
                               onClick={() => setProtection(selectedZone.id, false)}
                               className="w-full bg-blue-600 hover:bg-blue-700"
-                              disabled={selectedZone.status === 'unprotected'}
+                              disabled={selectedZone.status === 'unprotected' && !selectedZone.customStatus}
                             >
                               <Icon name="ShieldOff" size={20} className="mr-2" />
                               Снять с охраны
@@ -482,7 +740,7 @@ const Index = () => {
                       </div>
                       <div className="p-3 bg-blue-50 rounded-lg">
                         <div className="text-2xl font-bold text-blue-600">
-                          {emergencyHistory.filter(c => c.responseTime).reduce((acc, c) => acc + (c.responseTime || 0), 0) / Math.max(1, emergencyHistory.filter(c => c.responseTime).length) || 0}
+                          {Math.round(emergencyHistory.filter(c => c.responseTime).reduce((acc, c) => acc + (c.responseTime || 0), 0) / Math.max(1, emergencyHistory.filter(c => c.responseTime).length)) || 0}
                         </div>
                         <div className="text-xs text-gray-600">Ср. время (мин)</div>
                       </div>
@@ -583,10 +841,10 @@ const Index = () => {
                     <div className="flex gap-2">
                       <Button 
                         variant="outline"
-                        onClick={() => setSelectedZones(zones.map(z => z.id))}
+                        onClick={() => setSelectedZones(zones.filter(z => z.contractStatus === 'active').map(z => z.id))}
                         size="sm"
                       >
-                        Выбрать все
+                        Выбрать все активные
                       </Button>
                       <Button 
                         variant="outline"
@@ -606,18 +864,18 @@ const Index = () => {
                 </CardHeader>
                 <CardContent className="max-h-96 overflow-y-auto">
                   <div className="space-y-2">
-                    {sortedZones.map(zone => (
+                    {sortedZones.filter(zone => zone.contractStatus === 'active').map(zone => (
                       <div
                         key={zone.id}
                         className={`p-3 rounded-lg border transition-all ${
                           selectedZones.includes(zone.id) 
                             ? 'bg-blue-100 border-blue-300' 
-                            : zone.status === 'emergency' 
-                            ? 'bg-red-100 border-red-300' 
-                            : zone.status === 'protected'
-                            ? 'bg-green-50 border-green-200'
                             : 'bg-white border-gray-200'
                         }`}
+                        style={selectedZones.includes(zone.id) ? {} : { 
+                          backgroundColor: getStatusBgColor(zone),
+                          borderColor: getStatusColor(zone) + '40'
+                        }}
                       >
                         <div className="flex items-center space-x-3">
                           <Checkbox
@@ -628,12 +886,13 @@ const Index = () => {
                             <div className="font-medium">{zone.name}</div>
                             <div className="text-sm text-gray-500">{zone.address}</div>
                           </div>
-                          <Badge variant={getBadgeVariant(zone.status)} className={
-                            zone.status === 'protected' ? 'bg-green-500 text-white' :
-                            zone.status === 'emergency' ? 'bg-red-500 text-white' :
-                            'bg-blue-500 text-white'
-                          }>
-                            {getStatusText(zone.status)}
+                          <Badge 
+                            style={{ 
+                              backgroundColor: getStatusColor(zone), 
+                              color: 'white' 
+                            }}
+                          >
+                            {getStatusText(zone)}
                           </Badge>
                         </div>
                       </div>
@@ -645,27 +904,263 @@ const Index = () => {
           </TabsContent>
 
           {/* Отчеты */}
-          <TabsContent value="reports">
-            <Card>
-              <CardHeader>
-                <CardTitle>Отчеты и статистика</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-gray-500">Раздел в разработке...</p>
-              </CardContent>
-            </Card>
+          <TabsContent value="reports" className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>История участков</CardTitle>
+                  <CardDescription>Выберите участок для просмотра истории</CardDescription>
+                </CardHeader>
+                <CardContent className="max-h-80 overflow-y-auto">
+                  <div className="space-y-2">
+                    {zones.slice(0, 50).map(zone => (
+                      <div
+                        key={zone.id}
+                        onClick={() => setSelectedZoneForReport(zone)}
+                        className={`p-3 rounded-lg cursor-pointer border transition-all hover:shadow-md ${
+                          selectedZoneForReport?.id === zone.id ? 'ring-2 ring-blue-500' : ''
+                        }`}
+                        style={{ 
+                          backgroundColor: getStatusBgColor(zone),
+                          borderColor: getStatusColor(zone) + '40'
+                        }}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="font-medium">{zone.name}</div>
+                            <div className="text-sm text-gray-500">{zone.address}</div>
+                          </div>
+                          <Badge 
+                            style={{ 
+                              backgroundColor: getStatusColor(zone), 
+                              color: 'white' 
+                            }}
+                          >
+                            {getStatusText(zone)}
+                          </Badge>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>
+                    {selectedZoneForReport ? `История ${selectedZoneForReport.name}` : 'Выберите участок'}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {selectedZoneForReport ? (
+                    <div className="space-y-4">
+                      <div className="p-4 bg-gray-50 rounded-lg">
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div>
+                            <span className="text-gray-600">Адрес:</span>
+                            <div className="font-medium">{selectedZoneForReport.address}</div>
+                          </div>
+                          <div>
+                            <span className="text-gray-600">Телефон:</span>
+                            <div className="font-medium">{selectedZoneForReport.phone}</div>
+                          </div>
+                          <div>
+                            <span className="text-gray-600">Статус договора:</span>
+                            <div className={`font-medium ${getContractStatusColor(selectedZoneForReport.contractStatus)}`}>
+                              {getContractStatusText(selectedZoneForReport.contractStatus)}
+                            </div>
+                          </div>
+                          <div>
+                            <span className="text-gray-600">Последнее обновление:</span>
+                            <div className="font-medium">{selectedZoneForReport.lastUpdate.toLocaleString('ru-RU')}</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="max-h-64 overflow-y-auto space-y-2">
+                        {zoneHistory
+                          .filter(event => event.zoneId === selectedZoneForReport.id)
+                          .slice(0, 20)
+                          .map(event => (
+                            <div key={event.id} className="p-3 bg-white rounded-lg border">
+                              <div className="flex justify-between items-start">
+                                <div className="flex-1">
+                                  <div className="font-medium text-sm">{event.details}</div>
+                                  {(event.oldValue && event.newValue) && (
+                                    <div className="text-xs text-gray-500 mt-1">
+                                      {event.oldValue} → {event.newValue}
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="text-xs text-gray-400 ml-4">
+                                  {event.timestamp.toLocaleString('ru-RU')}
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        }
+                        {zoneHistory.filter(event => event.zoneId === selectedZoneForReport.id).length === 0 && (
+                          <p className="text-gray-500 text-center py-4">История пуста</p>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-gray-500 text-center py-8">
+                      Выберите участок из списка слева для просмотра истории
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
 
           {/* Настройки */}
-          <TabsContent value="settings">
-            <Card>
-              <CardHeader>
-                <CardTitle>Настройки системы</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-gray-500">Раздел в разработке...</p>
-              </CardContent>
-            </Card>
+          <TabsContent value="settings" className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Управление участками</CardTitle>
+                  <CardDescription>Создание, изменение и управление договорами</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* Создание нового участка */}
+                  <div className="p-4 border rounded-lg">
+                    <h4 className="font-medium mb-3">Добавить новый участок</h4>
+                    <div className="space-y-3">
+                      <div>
+                        <Label htmlFor="address">Адрес</Label>
+                        <Input
+                          id="address"
+                          placeholder="Введите адрес"
+                          value={newZoneAddress}
+                          onChange={(e) => setNewZoneAddress(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="phone">Номер телефона</Label>
+                        <Input
+                          id="phone"
+                          placeholder="+7XXXXXXXXXX"
+                          value={newZonePhone}
+                          onChange={(e) => setNewZonePhone(e.target.value)}
+                        />
+                      </div>
+                      <Button onClick={addNewZone} className="w-full">
+                        <Icon name="Plus" size={16} className="mr-2" />
+                        Создать участок
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Создание кастомного статуса */}
+                  <div className="p-4 border rounded-lg">
+                    <h4 className="font-medium mb-3">Создать кастомный статус</h4>
+                    <div className="space-y-3">
+                      <div>
+                        <Label htmlFor="statusName">Название статуса</Label>
+                        <Input
+                          id="statusName"
+                          placeholder="Например: Ремонт"
+                          value={newStatusName}
+                          onChange={(e) => setNewStatusName(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="statusColor">Цвет</Label>
+                        <input
+                          type="color"
+                          id="statusColor"
+                          className="w-full h-10 rounded border cursor-pointer"
+                          value={newStatusColor}
+                          onChange={(e) => setNewStatusColor(e.target.value)}
+                        />
+                      </div>
+                      <Button onClick={addCustomStatus} className="w-full">
+                        <Icon name="Palette" size={16} className="mr-2" />
+                        Создать статус
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Управление договорами</CardTitle>
+                  <CardDescription>Выберите участок для управления договором</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {selectedZone ? (
+                    <div className="space-y-4">
+                      <div className="p-4 bg-gray-50 rounded-lg">
+                        <div className="font-medium mb-2">{selectedZone.name}</div>
+                        <div className="text-sm text-gray-600 mb-2">{selectedZone.address}</div>
+                        <div className="text-sm">
+                          Статус договора: 
+                          <span className={`ml-1 font-medium ${getContractStatusColor(selectedZone.contractStatus)}`}>
+                            {getContractStatusText(selectedZone.contractStatus)}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Button 
+                          onClick={() => setContractStatus(selectedZone.id, 'suspended')}
+                          className="w-full bg-yellow-600 hover:bg-yellow-700"
+                          disabled={selectedZone.contractStatus === 'suspended'}
+                        >
+                          <Icon name="Pause" size={16} className="mr-2" />
+                          Временно приостановить тариф
+                        </Button>
+                        
+                        <Button 
+                          onClick={() => setContractStatus(selectedZone.id, 'active')}
+                          className="w-full bg-green-600 hover:bg-green-700"
+                          disabled={selectedZone.contractStatus === 'active'}
+                        >
+                          <Icon name="Play" size={16} className="mr-2" />
+                          Возобновить договор
+                        </Button>
+                        
+                        <Button 
+                          onClick={() => setContractStatus(selectedZone.id, 'terminated')}
+                          className="w-full bg-red-600 hover:bg-red-700"
+                          disabled={selectedZone.contractStatus === 'terminated'}
+                        >
+                          <Icon name="X" size={16} className="mr-2" />
+                          Расторгнуть договор
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <p className="text-gray-500 text-center py-4">
+                        Выберите участок во вкладке "Участки" для управления договором
+                      </p>
+                      
+                      <div className="border rounded-lg p-4">
+                        <h4 className="font-medium mb-2">Быстрый поиск участка</h4>
+                        <Select onValueChange={(value) => {
+                          const zone = zones.find(z => z.id === parseInt(value));
+                          if (zone) setSelectedZone(zone);
+                        }}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Выберите участок" />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-60">
+                            {zones.slice(0, 50).map(zone => (
+                              <SelectItem key={zone.id} value={zone.id.toString()}>
+                                {zone.name} - {zone.address}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
         </Tabs>
       </div>
