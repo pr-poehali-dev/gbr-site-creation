@@ -172,7 +172,7 @@ const Index = () => {
   const setBattery = (zoneId: number, charge: boolean) => {
     const zone = zones.find(z => z.id === zoneId);
     if (zone) {
-      const newBattery = charge ? 100 : Math.max(0, zone.battery - 20);
+      const newBattery = charge ? 100 : Math.max(0, zone.battery - 5); // Разряжается медленнее - на 5%
       setZones(prev => prev.map(zone => 
         zone.id === zoneId 
           ? { ...zone, battery: newBattery, lastUpdate: new Date() }
@@ -260,7 +260,14 @@ const Index = () => {
     if (zone) {
       setZones(prev => prev.map(zone => 
         zone.id === zoneId 
-          ? { ...zone, contractStatus: status, lastUpdate: new Date() }
+          ? { 
+              ...zone, 
+              contractStatus: status, 
+              lastUpdate: new Date(),
+              // При возобновлении договора возвращаем к нормальному режиму
+              status: status === 'active' && zone.contractStatus !== 'active' ? 'unprotected' : zone.status,
+              customStatus: status === 'active' && zone.contractStatus !== 'active' ? undefined : zone.customStatus
+            }
           : zone
       ));
       
@@ -351,14 +358,23 @@ const Index = () => {
     total: zones.length
   };
 
-  // Сортировка участков для отображения экстренных вызовов первыми
+  // Сортировка участков для отображения экстренных вызовов и низкого заряда первыми
   const sortedZones = [...zones].sort((a, b) => {
     if (a.status === 'emergency' && b.status !== 'emergency') return -1;
     if (a.status !== 'emergency' && b.status === 'emergency') return 1;
+    if (a.battery <= 20 && b.battery > 20) return -1;
+    if (a.battery > 20 && b.battery <= 20) return 1;
     return a.id - b.id;
   });
 
   const getStatusColor = (zone: SecurityZone) => {
+    // Проверяем статусы договора
+    if (zone.contractStatus === 'terminated') return '#dc2626';
+    if (zone.contractStatus === 'suspended') return '#f59e0b';
+    
+    // Проверяем низкий заряд батареи
+    if (zone.battery <= 20) return '#f59e0b';
+    
     if (zone.customStatus) return zone.customStatus.color;
     switch (zone.status) {
       case 'protected': return '#22c55e';
@@ -368,6 +384,13 @@ const Index = () => {
   };
 
   const getStatusBgColor = (zone: SecurityZone) => {
+    // Проверяем статусы договора
+    if (zone.contractStatus === 'terminated') return '#fecaca';
+    if (zone.contractStatus === 'suspended') return '#fef3c7';
+    
+    // Проверяем низкий заряд батареи
+    if (zone.battery <= 20) return '#fef3c7';
+    
     if (zone.customStatus) return zone.customStatus.bgColor;
     switch (zone.status) {
       case 'protected': return '#dcfce7';
@@ -377,6 +400,13 @@ const Index = () => {
   };
 
   const getStatusText = (zone: SecurityZone) => {
+    // Проверяем статусы договора
+    if (zone.contractStatus === 'terminated') return 'Договор расторгнут';
+    if (zone.contractStatus === 'suspended') return 'Тариф приостановлен';
+    
+    // Проверяем низкий заряд батареи
+    if (zone.battery <= 20) return 'Разряжено';
+    
     if (zone.customStatus) return zone.customStatus.name;
     switch (zone.status) {
       case 'protected': return 'Под охраной';
@@ -544,8 +574,10 @@ const Index = () => {
                       <div
                         key={zone.id}
                         onClick={() => setSelectedZone(zone)}
-                        className="p-3 rounded-lg cursor-pointer border transition-all hover:shadow-md"
-                        style={{ 
+                        className={`p-3 rounded-lg cursor-pointer border transition-all hover:shadow-md ${
+                          selectedZone?.id === zone.id ? 'ring-2 ring-blue-500' : ''
+                        }`}
+                        style={selectedZone?.id === zone.id ? {} : { 
                           backgroundColor: getStatusBgColor(zone),
                           borderColor: getStatusColor(zone) + '40'
                         }}
@@ -611,6 +643,7 @@ const Index = () => {
                         <Label>Кастомный статус:</Label>
                         <div className="flex gap-2">
                           <Select 
+                            key={customStatuses.length} // Force re-render when custom statuses change
                             value={selectedZone.customStatus?.id || ''} 
                             onValueChange={(value) => {
                               const status = customStatuses.find(s => s.id === value);
@@ -680,25 +713,36 @@ const Index = () => {
                         </Button>
 
                         {/* Управление батареей */}
-                        <div className="grid grid-cols-2 gap-2 pt-2 border-t">
-                          <Button 
-                            onClick={() => setBattery(selectedZone.id, true)}
-                            variant="outline"
-                            size="sm"
-                            className="bg-green-50 hover:bg-green-100"
-                          >
-                            <Icon name="Battery" size={16} className="mr-1" />
-                            Зарядить
-                          </Button>
-                          <Button 
-                            onClick={() => setBattery(selectedZone.id, false)}
-                            variant="outline"
-                            size="sm"
-                            className="bg-red-50 hover:bg-red-100"
-                          >
-                            <Icon name="BatteryLow" size={16} className="mr-1" />
-                            Разрядить
-                          </Button>
+                        <div className="pt-2 border-t space-y-2">
+                          {selectedZone.battery === 100 && (
+                            <div className="text-center text-sm text-green-600 font-medium mb-2">
+                              <Icon name="Battery" size={16} className="inline mr-1" />
+                              Батарея заряжена
+                            </div>
+                          )}
+                          
+                          <div className="grid grid-cols-2 gap-2">
+                            <Button 
+                              onClick={() => setBattery(selectedZone.id, true)}
+                              variant="outline"
+                              size="sm"
+                              className="bg-green-50 hover:bg-green-100"
+                              disabled={selectedZone.battery === 100}
+                            >
+                              <Icon name="Battery" size={16} className="mr-1" />
+                              Зарядить
+                            </Button>
+                            <Button 
+                              onClick={() => setBattery(selectedZone.id, false)}
+                              variant="outline"
+                              size="sm"
+                              className="bg-red-50 hover:bg-red-100"
+                              disabled={selectedZone.battery === 0}
+                            >
+                              <Icon name="BatteryLow" size={16} className="mr-1" />
+                              Разрядить
+                            </Button>
+                          </div>
                         </div>
                       </div>
                     </div>
