@@ -575,11 +575,10 @@ const Index = () => {
                         key={zone.id}
                         onClick={() => setSelectedZone(zone)}
                         className={`p-3 rounded-lg cursor-pointer border transition-all hover:shadow-md ${
-                          selectedZone?.id === zone.id ? 'ring-2 ring-blue-500' : ''
+                          selectedZone?.id === zone.id ? 'ring-2 ring-blue-500 bg-white' : 'bg-white'
                         }`}
-                        style={selectedZone?.id === zone.id ? {} : { 
-                          backgroundColor: getStatusBgColor(zone),
-                          borderColor: getStatusColor(zone) + '40'
+                        style={{ 
+                          borderColor: selectedZone?.id === zone.id ? '#3b82f6' : '#e5e7eb'
                         }}
                       >
                         <div className="flex items-center justify-between">
